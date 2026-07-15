@@ -69,16 +69,16 @@ export const DIFFICULTY_LEVELS = [
   {
     id: 'easy',
     label: 'Easy',
-    helper: 'Small numbers',
+    helper: '1-30 basics',
   },
   {
     id: 'normal',
     label: 'Normal',
-    helper: 'Mixed practice',
+    helper: '6-69 mixed',
   },
   {
     id: 'challenge',
     label: 'Challenge',
-    helper: 'Up to 99',
+    helper: '70-99 harder',
   },
 ];

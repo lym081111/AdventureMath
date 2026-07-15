@@ -28,6 +28,8 @@ yarn-error.*
 expo-server.log
 expo-web-server.log
 expo-go-qr.png
+*.apk
+.vscode/
 
 # macOS
 .DS_Store

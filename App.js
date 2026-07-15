@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -6,6 +7,7 @@ import {
   Animated,
   Easing,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -13,6 +15,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  StatusBar as NativeStatusBar,
 } from 'react-native';
 
 import {
@@ -25,12 +28,83 @@ import {
 import { generateQuestion } from './src/utils/questionGenerators';
 
 const MAX_MISTAKES = 12;
+const APP_VERSION = '1.1.0';
+const STORAGE_KEY = '@math-adventure/progress-v1';
+const ANDROID_TOP_INSET =
+  Platform.OS === 'android' ? Math.max(NativeStatusBar.currentHeight || 0, 44) : 0;
 
 const getQuestionKey = (question) =>
   `${question.topicId}-${question.prompt}-${JSON.stringify(question.answer)}-${JSON.stringify(question.display)}`;
 
 const getTopicAccuracy = (stats) =>
   stats.answered === 0 ? 0 : Math.round((stats.correct / stats.answered) * 100);
+
+const getTopicStats = (stats, topicId) =>
+  stats[topicId] || { answered: 0, correct: 0 };
+
+const isTopicUnlocked = (index, stats) =>
+  index === 0 || getTopicStats(stats, TOPICS[index - 1].id).correct >= 3;
+
+const getTopicUnlockText = (index) =>
+  index === 0 ? 'Ready now' : `Earn 3 stars in ${TOPICS[index - 1].mapLabel}`;
+
+const getNextDifficulty = (difficultyId) => {
+  const currentIndex = DIFFICULTY_LEVELS.findIndex(
+    (level) => level.id === difficultyId
+  );
+
+  return currentIndex >= 0 && currentIndex < DIFFICULTY_LEVELS.length - 1
+    ? DIFFICULTY_LEVELS[currentIndex + 1]
+    : null;
+};
+
+const getRecommendedQuest = (stats) => {
+  const topicRows = TOPICS.map((topic, index) => {
+    const topicStats = getTopicStats(stats, topic.id);
+
+    return {
+      ...topic,
+      accuracy: getTopicAccuracy(topicStats),
+      answered: topicStats.answered,
+      correct: topicStats.correct,
+      unlocked: isTopicUnlocked(index, stats),
+    };
+  });
+  const firstNewQuest = topicRows.find(
+    (topic) => topic.unlocked && topic.answered === 0
+  );
+
+  if (firstNewQuest) {
+    return {
+      topic: firstNewQuest,
+      reason: 'New quest ready',
+      detail: 'Start here to keep the adventure moving.',
+    };
+  }
+
+  const attemptedTopics = topicRows.filter(
+    (topic) => topic.unlocked && topic.answered > 0
+  );
+  const weakestTopic = attemptedTopics.reduce(
+    (weakest, topic) =>
+      !weakest || topic.accuracy < weakest.accuracy ? topic : weakest,
+    null
+  );
+
+  if (weakestTopic) {
+    return {
+      topic: weakestTopic,
+      reason: 'Practice target',
+      detail: 'A short retry here can lift your score quickly.',
+    };
+  }
+
+  return {
+    topic: topicRows[0],
+    reason: 'First mission',
+    detail: 'Begin with counting and unlock the next island.',
+  };
+};
 
 const optionToSpeechText = (option) =>
   typeof option === 'number' ? String(option) : option;
@@ -55,12 +129,86 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [speechEnabled, setSpeechEnabled] = useState(true);
   const [mistakes, setMistakes] = useState([]);
+  const [storageReady, setStorageReady] = useState(false);
   const [round, setRound] = useState({
     answered: 0,
     correct: 0,
     hearts: HEARTS_PER_ROUND,
   });
   const [stats, setStats] = useState({});
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSavedProgress = async () => {
+      try {
+        const savedValue = await AsyncStorage.getItem(STORAGE_KEY);
+
+        if (!savedValue || !isMounted) {
+          return;
+        }
+
+        const saved = JSON.parse(savedValue);
+
+        if (saved.stats && typeof saved.stats === 'object') {
+          setStats(saved.stats);
+        }
+
+        if (Array.isArray(saved.mistakes)) {
+          setMistakes(saved.mistakes.slice(0, MAX_MISTAKES));
+        }
+
+        if (DIFFICULTY_LEVELS.some((level) => level.id === saved.difficulty)) {
+          setDifficulty(saved.difficulty);
+        }
+
+        if (typeof saved.soundEnabled === 'boolean') {
+          setSoundEnabled(saved.soundEnabled);
+        }
+
+        if (typeof saved.speechEnabled === 'boolean') {
+          setSpeechEnabled(saved.speechEnabled);
+        }
+      } catch {
+        // Saved data should never block a child from starting the activity.
+      } finally {
+        if (isMounted) {
+          setStorageReady(true);
+        }
+      }
+    };
+
+    loadSavedProgress();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
+    const saveProgress = async () => {
+      try {
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            difficulty,
+            mistakes,
+            soundEnabled,
+            speechEnabled,
+            stats,
+          })
+        );
+      } catch {
+        // Progress saving is helpful, but the quiz should remain playable.
+      }
+    };
+
+    saveProgress();
+  }, [difficulty, mistakes, soundEnabled, speechEnabled, stats, storageReady]);
 
   const activeTopic = useMemo(
     () => TOPICS.find((topic) => topic.id === activeTopicId),
@@ -80,7 +228,7 @@ export default function App() {
 
   const teacherSummary = useMemo(() => {
     const topicRows = TOPICS.map((topic) => {
-      const topicStats = stats[topic.id] || { answered: 0, correct: 0 };
+      const topicStats = getTopicStats(stats, topic.id);
       return {
         ...topic,
         answered: topicStats.answered,
@@ -112,12 +260,18 @@ export default function App() {
     };
   }, [stats, totals.answered, totals.correct]);
 
-  const startTopic = (topicId) => {
+  const recommendedQuest = useMemo(
+    () => getRecommendedQuest(stats),
+    [stats]
+  );
+
+  const startTopic = (topicId, selectedDifficulty = difficulty) => {
     Speech.stop();
+    setDifficulty(selectedDifficulty);
     setActiveTopicId(topicId);
     setPlayMode('topic');
     setRound({ answered: 0, correct: 0, hearts: HEARTS_PER_ROUND });
-    setQuestion(generateQuestion(topicId, difficulty));
+    setQuestion(generateQuestion(topicId, selectedDifficulty));
     setSelectedChoice(null);
     setSequence([]);
     setFeedback(null);
@@ -351,22 +505,17 @@ export default function App() {
   if (!activeTopicId) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+        <StatusBar backgroundColor="#13293D" style="light" translucent={false} />
         <ScrollView contentContainerStyle={styles.homeContainer}>
-          <Hero mistakesCount={mistakes.length} totals={totals} />
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => setShowSettings(true)}
-            style={styles.settingsCard}
-          >
-            <Text style={styles.settingsCardIcon}>⚙</Text>
-            <View style={styles.settingsCardCopy}>
-              <Text style={styles.settingsCardTitle}>Settings</Text>
-              <Text style={styles.settingsCardText}>
-                Sound, speech, and progress controls
-              </Text>
-            </View>
-          </TouchableOpacity>
+          <Hero
+            mistakesCount={mistakes.length}
+            onSettings={() => setShowSettings(true)}
+            totals={totals}
+          />
+          <RecommendedQuestCard
+            onPress={() => startTopic(recommendedQuest.topic.id)}
+            quest={recommendedQuest}
+          />
           <TeacherSummaryCard
             onPress={() => setShowTeacherSummary(true)}
             summary={teacherSummary}
@@ -384,7 +533,10 @@ export default function App() {
           <Text style={styles.sectionLabel}>Quest Map</Text>
           <View style={styles.questMap}>
             {TOPICS.map((topic, index) => {
-              const topicStats = stats[topic.id] || { answered: 0, correct: 0 };
+              const topicStats = getTopicStats(stats, topic.id);
+              const unlocked = isTopicUnlocked(index, stats);
+              const completed = topicStats.correct >= 3;
+              const isRecommended = recommendedQuest.topic.id === topic.id;
               const progress =
                 topicStats.answered === 0
                   ? 0
@@ -397,7 +549,11 @@ export default function App() {
                   progress={progress}
                   topic={topic}
                   topicStats={topicStats}
-                  onPress={() => startTopic(topic.id)}
+                  unlocked={unlocked}
+                  unlockText={getTopicUnlockText(index)}
+                  completed={completed}
+                  isRecommended={isRecommended}
+                  onPress={unlocked ? () => startTopic(topic.id) : undefined}
                 />
               );
             })}
@@ -425,10 +581,22 @@ export default function App() {
   }
 
   const roundComplete = round.answered >= ROUND_SIZE && !feedback;
+  const activeDifficultyLevel =
+    DIFFICULTY_LEVELS.find((level) => level.id === difficulty) ||
+    DIFFICULTY_LEVELS[1];
+  const activeTopicIndex = TOPICS.findIndex((topic) => topic.id === activeTopicId);
+  const nextDifficulty = getNextDifficulty(difficulty);
+  const nextTopic =
+    activeTopicIndex >= 0 && activeTopicIndex < TOPICS.length - 1
+      ? TOPICS[activeTopicIndex + 1]
+      : null;
+  const nextTopicUnlocked = nextTopic
+    ? isTopicUnlocked(activeTopicIndex + 1, stats)
+    : false;
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar backgroundColor="#13293D" style="light" translucent={false} />
       <ScrollView contentContainerStyle={styles.practiceContainer}>
         <View style={styles.practiceTopBar}>
           <TouchableOpacity
@@ -483,7 +651,9 @@ export default function App() {
           </View>
           <View style={styles.missionCopy}>
             <Text style={styles.missionEyebrow}>
-              {playMode === 'review' ? 'Mistake review' : `Stage ${round.answered + 1} of ${ROUND_SIZE}`}
+              {playMode === 'review'
+                ? 'Mistake review'
+                : `${activeDifficultyLevel.label} - Stage ${round.answered + 1} of ${ROUND_SIZE}`}
             </Text>
             <Text style={styles.missionTitle}>{activeTopic.mapLabel}</Text>
             <Text style={styles.missionText}>{activeTopic.mission}</Text>
@@ -493,9 +663,15 @@ export default function App() {
         {roundComplete ? (
           <RoundComplete
             activeTopic={activeTopic}
+            currentDifficulty={difficulty}
+            nextDifficulty={nextDifficulty}
+            nextTopic={nextTopic}
+            nextTopicUnlocked={nextTopicUnlocked}
             round={round}
-            onReplay={() => startTopic(activeTopicId)}
             onHome={goHome}
+            onNextDifficulty={() => startTopic(activeTopicId, nextDifficulty.id)}
+            onNextTopic={() => startTopic(nextTopic.id, difficulty)}
+            onReplay={() => startTopic(activeTopicId, difficulty)}
           />
         ) : (
           <>
@@ -529,22 +705,50 @@ export default function App() {
 
               {question.type === 'choice' ? (
                 <View style={styles.optionsGrid}>
-                  {question.options.map((option) => (
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      key={String(option)}
-                      onPress={() => submitChoice(option)}
-                      style={[
-                        styles.optionButton,
-                        selectedChoice === option && {
-                          borderColor: activeTopic.color,
-                          backgroundColor: activeTopic.softColor,
-                        },
-                      ]}
-                    >
-                      <Text style={styles.optionText}>{option}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {question.options.map((option) => {
+                    const isSelected = selectedChoice === option;
+                    const isAnswer = option === question.answer;
+                    const showCorrect = Boolean(feedback && isAnswer);
+                    const showWrong = Boolean(feedback && isSelected && !feedback.isCorrect);
+
+                    return (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        disabled={Boolean(feedback)}
+                        key={String(option)}
+                        onPress={() => submitChoice(option)}
+                        style={[
+                          styles.optionButton,
+                          isSelected && !feedback && {
+                            borderColor: activeTopic.color,
+                            backgroundColor: activeTopic.softColor,
+                          },
+                          showCorrect && styles.optionButtonCorrect,
+                          showWrong && styles.optionButtonWrong,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionText,
+                            showCorrect && styles.optionTextCorrect,
+                            showWrong && styles.optionTextWrong,
+                          ]}
+                        >
+                          {option}
+                        </Text>
+                        {(showCorrect || showWrong) && (
+                          <Text
+                            style={[
+                              styles.optionResultTag,
+                              showWrong && styles.optionResultTagWrong,
+                            ]}
+                          >
+                            {showCorrect ? 'Correct' : 'Try again'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               ) : (
                 <SequenceBuilder
@@ -605,14 +809,24 @@ export default function App() {
   );
 }
 
-function Hero({ mistakesCount, totals }) {
+function Hero({ mistakesCount, onSettings, totals }) {
   return (
     <View style={styles.hero}>
       <View style={styles.heroSky}>
         <View style={[styles.floatDot, styles.floatDotOne]} />
         <View style={[styles.floatDot, styles.floatDotTwo]} />
         <View style={[styles.floatDot, styles.floatDotThree]} />
-        <Text style={styles.heroBadge}>Number Quest</Text>
+        <View style={styles.heroTopRow}>
+          <Text style={styles.heroBadge}>Number Quest</Text>
+          <TouchableOpacity
+            accessibilityLabel="Open settings"
+            accessibilityRole="button"
+            onPress={onSettings}
+            style={styles.heroSettingsButton}
+          >
+            <Text style={styles.heroSettingsIcon}>⚙</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={styles.heroTitle}>Play, solve, level up!</Text>
         <Text style={styles.heroText}>
           Pick a math island, finish mini challenges, and collect XP for every
@@ -636,6 +850,37 @@ function HudPill({ label, value, color }) {
       <Text style={styles.hudValue}>{value}</Text>
       <Text style={styles.hudLabel}>{label}</Text>
     </View>
+  );
+}
+
+function RecommendedQuestCard({ onPress, quest }) {
+  const { topic } = quest;
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[
+        styles.recommendedCard,
+        { backgroundColor: topic.softColor, borderColor: topic.color },
+      ]}
+    >
+      <View style={[styles.recommendedIconRing, { backgroundColor: topic.color }]}>
+        <Text style={styles.recommendedIcon}>{topic.icon}</Text>
+      </View>
+      <View style={styles.recommendedCopy}>
+        <Text style={[styles.recommendedKicker, { color: topic.deepColor }]}>
+          Recommended Quest
+        </Text>
+        <Text style={styles.recommendedTitle}>{topic.mapLabel}</Text>
+        <Text style={styles.recommendedText}>
+          {quest.reason}: {quest.detail}
+        </Text>
+      </View>
+      <View style={[styles.recommendedAction, { backgroundColor: topic.color }]}>
+        <Text style={styles.recommendedActionText}>Start</Text>
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -866,34 +1111,95 @@ function HintPopup({ hint, onClose, topic, visible }) {
   );
 }
 
-function QuestNode({ topic, index, progress, topicStats, onPress }) {
+function QuestNode({
+  topic,
+  index,
+  progress,
+  topicStats,
+  unlocked,
+  unlockText,
+  completed,
+  isRecommended,
+  onPress,
+}) {
   const sideStyle = index % 2 === 0 ? styles.nodeLeft : styles.nodeRight;
 
   return (
     <View style={[styles.nodeRow, sideStyle]}>
-      {index < TOPICS.length - 1 && <View style={styles.mapConnector} />}
+      {index < TOPICS.length - 1 && (
+        <View pointerEvents="none" style={styles.mapConnector} />
+      )}
       <TouchableOpacity
         accessibilityRole="button"
+        disabled={!unlocked}
         onPress={onPress}
         style={[
           styles.questNode,
-          { backgroundColor: topic.softColor, borderColor: topic.color },
+          unlocked
+            ? { backgroundColor: topic.softColor, borderColor: topic.color }
+            : styles.questNodeLocked,
+          isRecommended && styles.questNodeRecommended,
+          completed && styles.questNodeCompleted,
         ]}
       >
-        <View style={[styles.nodeIconRing, { backgroundColor: topic.color }]}>
-          <Text style={styles.nodeIcon}>{topic.icon}</Text>
+        <View
+          style={[
+            styles.nodeStatusRibbon,
+            completed
+              ? styles.nodeStatusCleared
+              : isRecommended
+                ? { backgroundColor: topic.color }
+                : styles.nodeStatusDefault,
+          ]}
+        >
+          <Text style={styles.nodeStatusText}>
+            {completed ? 'Cleared' : isRecommended ? 'Next' : unlocked ? 'Open' : 'Locked'}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.nodeIconRing,
+            { backgroundColor: unlocked ? topic.color : '#A9B8C8' },
+          ]}
+        >
+          <Text style={[styles.nodeIcon, !unlocked && styles.nodeIconLocked]}>
+            {unlocked ? topic.icon : 'LOCK'}
+          </Text>
         </View>
         <View style={styles.nodeCopy}>
-          <Text style={[styles.nodeLevel, { color: topic.deepColor }]}>
-            Level {index + 1}
+          <Text
+            style={[
+              styles.nodeLevel,
+              { color: unlocked ? topic.deepColor : '#6B7D90' },
+            ]}
+          >
+            {unlocked ? `Level ${index + 1}` : 'Locked Level'}
           </Text>
           <Text style={styles.nodeTitle}>{topic.mapLabel}</Text>
-          <Text style={styles.nodeMission}>{topic.mission}</Text>
+          <Text style={styles.nodeMission}>
+            {unlocked ? topic.mission : unlockText}
+          </Text>
           <View style={styles.nodeFooter}>
-            <Text style={styles.nodeProgress}>{progress}% cleared</Text>
+            <Text style={styles.nodeProgress}>
+              {unlocked ? `${progress}% cleared` : 'Unlock goal'}
+            </Text>
             <Text style={styles.nodeScore}>
               {topicStats.correct}/{topicStats.answered || 0} ★
             </Text>
+          </View>
+          <View style={styles.nodeStarsRow}>
+            {Array.from({ length: 3 }).map((_, starIndex) => (
+              <View
+                key={starIndex}
+                style={[
+                  styles.nodeStarDot,
+                  starIndex < Math.min(3, topicStats.correct) && {
+                    backgroundColor: topic.color,
+                    borderColor: topic.deepColor,
+                  },
+                ]}
+              />
+            ))}
           </View>
         </View>
       </TouchableOpacity>
@@ -901,13 +1207,30 @@ function QuestNode({ topic, index, progress, topicStats, onPress }) {
   );
 }
 
-function RoundComplete({ activeTopic, round, onReplay, onHome }) {
+function RoundComplete({
+  activeTopic,
+  currentDifficulty,
+  nextDifficulty,
+  nextTopic,
+  nextTopicUnlocked,
+  round,
+  onHome,
+  onNextDifficulty,
+  onNextTopic,
+  onReplay,
+}) {
   const badgeEarned = round.correct >= 3;
+  const difficultyLabel =
+    DIFFICULTY_LEVELS.find((level) => level.id === currentDifficulty)?.label ||
+    currentDifficulty;
 
   return (
     <View style={styles.completeCard}>
       <Text style={styles.certificateEyebrow}>Math Hero Certificate</Text>
       <View style={[styles.certificatePanel, { borderColor: activeTopic.color }]}>
+        <View style={[styles.confettiDot, styles.confettiDotOne, { backgroundColor: activeTopic.color }]} />
+        <View style={[styles.confettiDot, styles.confettiDotTwo]} />
+        <View style={[styles.confettiDot, styles.confettiDotThree, { backgroundColor: activeTopic.softColor }]} />
         <View style={[styles.rewardMedal, { backgroundColor: activeTopic.color }]}>
           <Text style={styles.rewardMedalText}>★</Text>
         </View>
@@ -915,6 +1238,11 @@ function RoundComplete({ activeTopic, round, onReplay, onHome }) {
         <Text style={styles.completeText}>
           Awarded for completing {activeTopic.mapLabel} with courage and focus.
         </Text>
+        <View style={[styles.xpBanner, { backgroundColor: activeTopic.deepColor }]}>
+          <Text style={styles.xpBannerText}>
+            +{round.correct * XP_PER_CORRECT} XP earned
+          </Text>
+        </View>
       </View>
       <View style={styles.rewardRow}>
         <RewardBox label="Accuracy" value={`${round.correct}/${ROUND_SIZE}`} />
@@ -936,21 +1264,100 @@ function RoundComplete({ activeTopic, round, onReplay, onHome }) {
             : 'Earn 3 stars to unlock this badge'}
         </Text>
       </View>
-      <TouchableOpacity
-        accessibilityRole="button"
-        onPress={onReplay}
-        style={[styles.primaryButton, { backgroundColor: activeTopic.color }]}
-      >
-        <Text style={styles.primaryButtonText}>Replay Quest</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityRole="button"
-        onPress={onHome}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonText}>Back to Map</Text>
-      </TouchableOpacity>
+
+      <View style={styles.nextStepPanel}>
+        <View style={styles.nextStepHeader}>
+          <Text style={styles.nextStepTitle}>Choose your next move</Text>
+          <Text style={styles.nextStepHint}>{difficultyLabel} cleared</Text>
+        </View>
+
+        <View style={styles.nextStepGrid}>
+          {nextDifficulty ? (
+            <NextStepCard
+              accentColor={activeTopic.color}
+              helper={`Try ${activeTopic.mapLabel} with bigger challenge.`}
+              label="Level Up"
+              onPress={onNextDifficulty}
+              title={`${nextDifficulty.label} ${activeTopic.mapLabel}`}
+            />
+          ) : (
+            <NextStepCard
+              accentColor={activeTopic.color}
+              helper="You cleared the hardest level here."
+              label="Mastered"
+              onPress={onReplay}
+              title={`Replay ${activeTopic.mapLabel}`}
+            />
+          )}
+
+          <NextStepCard
+            accentColor={nextTopic?.color || '#58CC02'}
+            disabled={!nextTopic || !nextTopicUnlocked}
+            helper={
+              nextTopic
+                ? nextTopicUnlocked
+                  ? `Continue at ${difficultyLabel} level.`
+                  : `Earn 3 stars in ${activeTopic.mapLabel} first.`
+                : 'All islands are completed.'
+            }
+            label="Next Island"
+            onPress={nextTopicUnlocked ? onNextTopic : undefined}
+            title={nextTopic ? nextTopic.mapLabel : 'All Done'}
+          />
+        </View>
+
+        <View style={styles.completeFooterRow}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={onReplay}
+            style={styles.replaySmallButton}
+          >
+            <Text style={styles.replaySmallText}>Replay</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={onHome}
+            style={styles.mapSmallButton}
+          >
+            <Text style={styles.mapSmallText}>Map</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
+  );
+}
+
+function NextStepCard({
+  accentColor,
+  disabled = false,
+  helper,
+  label,
+  onPress,
+  title,
+}) {
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        styles.nextStepCard,
+        disabled && styles.nextStepCardDisabled,
+        { borderColor: disabled ? '#CAD6E3' : accentColor },
+      ]}
+    >
+      <View
+        style={[
+          styles.nextStepIcon,
+          { backgroundColor: disabled ? '#CAD6E3' : accentColor },
+        ]}
+      >
+        <Text style={styles.nextStepIconText}>{disabled ? '...' : '>'}</Text>
+      </View>
+      <Text style={styles.nextStepLabel}>{label}</Text>
+      <Text style={styles.nextStepCardTitle}>{title}</Text>
+      <Text style={styles.nextStepCardText}>{helper}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1001,6 +1408,13 @@ function SettingsModal({
               <Text style={styles.settingText}>Read questions and choices aloud.</Text>
             </View>
             <Switch value={speechEnabled} onValueChange={setSpeechEnabled} />
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingCopy}>
+              <Text style={styles.settingTitle}>App Version</Text>
+              <Text style={styles.settingText}>Math Adventure {APP_VERSION}</Text>
+            </View>
           </View>
 
           <TouchableOpacity
@@ -1072,8 +1486,8 @@ function QuestionDisplay({ question, topic }) {
     <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
       <Text style={styles.visualTitle}>Tap the trail stones</Text>
       <View style={styles.trailPreview}>
-        {[1, 2, 3, 4].map((item) => (
-          <View key={item} style={[styles.trailStone, { borderColor: topic.color }]}>
+        {question.answer.map((_, index) => (
+          <View key={index} style={[styles.trailStone, { borderColor: topic.color }]}>
             <Text style={styles.trailStoneText}>?</Text>
           </View>
         ))}
@@ -1242,6 +1656,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#13293D',
+    paddingTop: ANDROID_TOP_INSET,
   },
   homeContainer: {
     padding: 18,
@@ -1257,6 +1672,12 @@ const styles = StyleSheet.create({
     minHeight: 225,
     overflow: 'hidden',
     padding: 24,
+  },
+  heroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
   floatDot: {
     backgroundColor: 'rgba(255, 255, 255, 0.26)',
@@ -1288,9 +1709,21 @@ const styles = StyleSheet.create({
     color: '#0B6FA4',
     fontSize: 14,
     fontWeight: '900',
-    marginBottom: 14,
     paddingHorizontal: 14,
     paddingVertical: 7,
+  },
+  heroSettingsButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    height: 46,
+    justifyContent: 'center',
+    width: 46,
+  },
+  heroSettingsIcon: {
+    color: '#0B6FA4',
+    fontSize: 24,
+    fontWeight: '900',
   },
   heroTitle: {
     color: '#FFFFFF',
@@ -1338,6 +1771,62 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
     marginTop: 1,
+  },
+  recommendedCard: {
+    ...shadow,
+    alignItems: 'center',
+    borderRadius: 26,
+    borderWidth: 3,
+    flexDirection: 'row',
+    gap: 13,
+    marginBottom: 14,
+    padding: 16,
+  },
+  recommendedIconRing: {
+    alignItems: 'center',
+    borderColor: '#FFFFFF',
+    borderRadius: 25,
+    borderWidth: 4,
+    height: 68,
+    justifyContent: 'center',
+    width: 68,
+  },
+  recommendedIcon: {
+    fontSize: 31,
+  },
+  recommendedCopy: {
+    flex: 1,
+  },
+  recommendedKicker: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+    marginBottom: 3,
+    textTransform: 'uppercase',
+  },
+  recommendedTitle: {
+    color: '#13293D',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  recommendedText: {
+    color: '#42576C',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  recommendedAction: {
+    alignItems: 'center',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 14,
+  },
+  recommendedActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
   settingsCard: {
     ...shadow,
@@ -1609,6 +2098,41 @@ const styles = StyleSheet.create({
     gap: 14,
     minHeight: 142,
     padding: 15,
+    paddingTop: 24,
+    position: 'relative',
+  },
+  questNodeRecommended: {
+    borderWidth: 4,
+    transform: [{ scale: 1.01 }],
+  },
+  questNodeCompleted: {
+    borderBottomWidth: 6,
+  },
+  questNodeLocked: {
+    backgroundColor: '#EEF3F8',
+    borderColor: '#A9B8C8',
+    opacity: 0.95,
+  },
+  nodeStatusRibbon: {
+    borderBottomLeftRadius: 13,
+    borderTopRightRadius: 23,
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+    position: 'absolute',
+    right: -3,
+    top: -3,
+  },
+  nodeStatusDefault: {
+    backgroundColor: '#7A8CA0',
+  },
+  nodeStatusCleared: {
+    backgroundColor: '#58CC02',
+  },
+  nodeStatusText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   nodeIconRing: {
     alignItems: 'center',
@@ -1621,6 +2145,11 @@ const styles = StyleSheet.create({
   },
   nodeIcon: {
     fontSize: 34,
+  },
+  nodeIconLocked: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
   },
   nodeCopy: {
     flex: 1,
@@ -1657,6 +2186,19 @@ const styles = StyleSheet.create({
     color: '#13293D',
     fontSize: 13,
     fontWeight: '900',
+  },
+  nodeStarsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 9,
+  },
+  nodeStarDot: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CAD6E3',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 14,
+    width: 14,
   },
   practiceContainer: {
     padding: 16,
@@ -1957,12 +2499,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  optionButtonCorrect: {
+    backgroundColor: '#E7FAD7',
+    borderColor: '#58CC02',
+    borderBottomColor: '#2F7D00',
+  },
+  optionButtonWrong: {
+    backgroundColor: '#FFE2DD',
+    borderColor: '#FF6B6B',
+    borderBottomColor: '#B93434',
+  },
   optionText: {
     color: '#13293D',
     fontSize: 21,
     fontWeight: '900',
     textAlign: 'center',
     textTransform: 'capitalize',
+  },
+  optionTextCorrect: {
+    color: '#2F7D00',
+  },
+  optionTextWrong: {
+    color: '#B93434',
+  },
+  optionResultTag: {
+    backgroundColor: '#58CC02',
+    borderRadius: 999,
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '900',
+    marginTop: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    textTransform: 'uppercase',
+  },
+  optionResultTagWrong: {
+    backgroundColor: '#FF6B6B',
   },
   sequenceSlots: {
     flexDirection: 'row',
@@ -2399,8 +2971,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8E8',
     borderRadius: 28,
     borderWidth: 4,
+    overflow: 'hidden',
     padding: 18,
+    position: 'relative',
     width: '100%',
+  },
+  confettiDot: {
+    borderRadius: 999,
+    position: 'absolute',
+  },
+  confettiDotOne: {
+    height: 54,
+    left: 18,
+    top: 18,
+    width: 54,
+  },
+  confettiDotTwo: {
+    backgroundColor: '#FFB020',
+    bottom: 28,
+    height: 36,
+    right: 28,
+    width: 36,
+  },
+  confettiDotThree: {
+    height: 84,
+    right: -26,
+    top: -26,
+    width: 84,
   },
   rewardMedal: {
     alignItems: 'center',
@@ -2429,6 +3026,17 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     textAlign: 'center',
   },
+  xpBanner: {
+    borderRadius: 999,
+    marginTop: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+  },
+  xpBannerText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
   certificateBadgeStrip: {
     alignItems: 'center',
     borderRadius: 22,
@@ -2451,6 +3059,112 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     width: '100%',
+  },
+  nextStepPanel: {
+    backgroundColor: '#F6F9FC',
+    borderRadius: 26,
+    gap: 14,
+    padding: 14,
+    width: '100%',
+  },
+  nextStepHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  nextStepTitle: {
+    color: '#13293D',
+    flex: 1,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+  nextStepHint: {
+    color: '#60758A',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  nextStepGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nextStepCard: {
+    alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 5,
+    borderRadius: 22,
+    borderWidth: 3,
+    flex: 1,
+    minHeight: 166,
+    padding: 13,
+  },
+  nextStepCardDisabled: {
+    opacity: 0.62,
+  },
+  nextStepIcon: {
+    alignItems: 'center',
+    borderRadius: 17,
+    height: 42,
+    justifyContent: 'center',
+    marginBottom: 10,
+    width: 42,
+  },
+  nextStepIconText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  nextStepLabel: {
+    color: '#60758A',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  nextStepCardTitle: {
+    color: '#13293D',
+    fontSize: 17,
+    fontWeight: '900',
+    lineHeight: 21,
+    marginTop: 4,
+  },
+  nextStepCardText: {
+    color: '#4F6477',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  completeFooterRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  replaySmallButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CAD6E3',
+    borderRadius: 18,
+    borderWidth: 2,
+    flex: 1,
+    minHeight: 50,
+    justifyContent: 'center',
+  },
+  replaySmallText: {
+    color: '#13293D',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  mapSmallButton: {
+    alignItems: 'center',
+    backgroundColor: '#13293D',
+    borderRadius: 18,
+    flex: 1,
+    minHeight: 50,
+    justifyContent: 'center',
+  },
+  mapSmallText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
   },
   rewardBox: {
     backgroundColor: '#F6F9FC',
