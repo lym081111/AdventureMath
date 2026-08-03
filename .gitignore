@@ -31,6 +31,10 @@ expo-go-qr.png
 *.apk
 .vscode/
 
+# Local image-generation drafts; only cleaned runtime mascot assets are committed
+assets/nova-*.png
+!assets/nova-*-clean.png
+
 # macOS
 .DS_Store
 *.pem

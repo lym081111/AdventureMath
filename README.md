@@ -2,7 +2,7 @@
 
 An Expo React Native mobile app for the Individual Practical Assignment.
 
-Current app version: `1.1.0`
+Current app version: `2.0.1` (Android version code `17`)
 
 ## Assignment Coverage
 
@@ -13,7 +13,9 @@ Current app version: `1.1.0`
 
 ## Extra Interactive Features
 
-- Direct navigation from the home screen to every topic.
+- Responsive four-world adventure map with original illustrated scenes and direct access to every topic.
+- Home dashboard shows Journey, Review, and Progress status at a glance.
+- World launcher keeps difficulty selection beside the selected mission.
 - Random exercise generation for every topic.
 - Five-question mini rounds with score tracking.
 - Child-friendly feedback after every answer.
@@ -23,13 +25,38 @@ Current app version: `1.1.0`
 - Badge shelf unlocks topic badges after successful practice.
 - Hint button gives child-friendly guidance before answering.
 - Speak button reads the question and answer choices aloud.
-- Teacher Summary shows accuracy, mistakes, badges, strengths, and weak topics.
+- Learning Report shows accuracy, mistakes, mastery, strengths, and topics needing practice.
 - Sound effects play for correct, wrong, and reward moments.
 - Settings screen controls sound, speech, and progress reset.
 - Round completion shows a Math Hero Certificate with XP, hearts, and badge status.
 - Answer feedback pop-ups include a bounce/fade animation.
 - Big touch targets, readable text, and colorful game-style topic cards.
 - Retry, reset, next question, and home navigation controls.
+- Original Nova story guide and explorer-mark onboarding.
+- Daily Adventure: a three-stage daily quest with a learning streak.
+- Smart Coach: rule-based practice recommendations from skill performance.
+- Adventure Book: per-topic mastery levels and learning-progress bars.
+- Compact two-way picture questions: number-to-picture and picture-to-number.
+- Tap-to-build Number Workshop with +10 rods, +1 gems, visual machine choices, and missing-part puzzles.
+- Comet Track uses direct smallest-to-biggest and biggest-to-smallest ordering with colorful number stops; hidden arithmetic-pattern questions are excluded for younger children.
+- Comet Track supports Undo and waits for the child to press Check Route before marking an answer.
+- The home screen and every practice world use a full-screen child-friendly background color.
+- Word Garden uses animated flower-style number and word displays.
+- Wrong-answer feedback includes a Show Me Why visual walkthrough tailored to the current question.
+- Apple Orchard includes an interactive ten-frame tray that lets children add or remove objects before checking.
+- Word Garden includes a number-to-word matching game with cancellable selections and visible pair progress.
+
+## Validate Random Questions
+
+Run the generator safety test before a release build:
+
+```bash
+node scripts/validateQuestions.mjs
+```
+
+The script generates 6,000 questions and checks answer availability, duplicate
+options, place-value consistency, ten-frame capacity, matching-pair integrity,
+and the child-friendly Comet Track question rule.
 
 ## Run on Phone with Expo Go
 
@@ -75,14 +102,14 @@ The standalone Android APK is not committed to GitHub because APK files are
 generated build artifacts. Use the release APK file provided separately:
 
 ```text
-MathAdventure-v1.1.0-release.apk
+MathAdventure-v2.0.1-release.apk
 ```
 
 Install it on an Android phone, then open the app and go to Settings. The app
 should show:
 
 ```text
-Math Adventure 1.1.0
+Math Adventure 2.0.1
 ```
 
 If an older version is already installed, uninstall the old Math Adventure app
