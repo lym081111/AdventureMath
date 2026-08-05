@@ -19,6 +19,25 @@ const assert = (condition, message, question) => {
 const optionValue = (option) =>
   typeof option === 'object' && option !== null ? option.count : option;
 
+const isSingleDigitCount = (value) =>
+  Number.isInteger(value) && value >= 1 && value <= 9;
+
+const countingDisplayValues = (display) => {
+  if (display.kind === 'objects') {
+    return [display.count];
+  }
+
+  if (display.kind === 'targetNumber' || display.kind === 'tenFrameTarget') {
+    return [display.number];
+  }
+
+  if (display.kind === 'compareObjects') {
+    return [display.leftCount, display.rightCount];
+  }
+
+  return [];
+};
+
 let validated = 0;
 const typeCounts = new Map();
 
@@ -32,6 +51,29 @@ for (const topic of topics) {
       assert(question.topicId === topic, 'Question topic does not match the request.', question);
       assert(question.prompt && question.helper, 'Question copy is incomplete.', question);
       assert(question.display?.kind, 'Question display kind is missing.', question);
+
+      if (topic === 'counting') {
+        const displayValues = countingDisplayValues(question.display);
+        const numericalOptions = question.options
+          .map(optionValue)
+          .filter((value) => typeof value === 'number');
+
+        assert(
+          typeof question.answer !== 'number' || isSingleDigitCount(question.answer),
+          'Counting answer must be between 1 and 9.',
+          question
+        );
+        assert(
+          displayValues.length > 0 && displayValues.every(isSingleDigitCount),
+          'Every displayed counting value must be between 1 and 9.',
+          question
+        );
+        assert(
+          numericalOptions.every(isSingleDigitCount),
+          'Every numerical counting option must be between 1 and 9.',
+          question
+        );
+      }
 
       if (question.type === 'choice') {
         const values = question.options.map(optionValue);

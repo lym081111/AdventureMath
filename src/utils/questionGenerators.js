@@ -64,8 +64,8 @@ const DIFFICULTY_CONFIG = {
   },
   normal: {
     label: 'Normal',
-    countingMin: 6,
-    countingMax: 12,
+    countingMin: 4,
+    countingMax: 9,
     placeMin: 30,
     placeMax: 69,
     wordMin: 21,
@@ -79,8 +79,8 @@ const DIFFICULTY_CONFIG = {
   },
   challenge: {
     label: 'Challenge',
-    countingMin: 10,
-    countingMax: 18,
+    countingMin: 6,
+    countingMax: 9,
     placeMin: 70,
     placeMax: 99,
     wordMin: 61,
@@ -271,7 +271,7 @@ export const generateQuestion = (topicId, difficulty = 'normal') => {
     const object = objectDetail.emoji;
 
     if (Math.random() < 0.24) {
-      const capacity = answer <= 10 ? 10 : 20;
+      const capacity = 10;
 
       return {
         type: 'tenFrame',

@@ -1,11 +1,11 @@
 {
   "name": "math-adventure-app",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "main": "index.js",
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~54.0.35",
+    "expo": "~54.0.36",
     "expo-av": "~16.0.8",
     "expo-speech": "~14.0.8",
     "expo-status-bar": "~3.0.9",

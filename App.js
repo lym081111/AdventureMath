@@ -4,6 +4,7 @@ import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Easing,
   Image,
@@ -22,7 +23,6 @@ import {
 
 import {
   DIFFICULTY_LEVELS,
-  HEARTS_PER_ROUND,
   ROUND_SIZE,
   TOPICS,
   XP_PER_CORRECT,
@@ -30,7 +30,7 @@ import {
 import { generateQuestion } from './src/utils/questionGenerators';
 
 const MAX_MISTAKES = 12;
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.0.2';
 const STORAGE_KEY = '@math-adventure/progress-v1';
 const DAILY_QUEST_SIZE = 3;
 const ANDROID_TOP_INSET =
@@ -289,6 +289,7 @@ function BouncyTouchable({
 
 export default function App() {
   const [activeTopicId, setActiveTopicId] = useState(null);
+  const [homeTab, setHomeTab] = useState('journey');
   const [playMode, setPlayMode] = useState('topic');
   const [difficulty, setDifficulty] = useState('normal');
   const [question, setQuestion] = useState(null);
@@ -301,6 +302,7 @@ export default function App() {
   const [showAdventureBook, setShowAdventureBook] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [speechEnabled, setSpeechEnabled] = useState(true);
   const [motionEnabled, setMotionEnabled] = useState(true);
@@ -320,7 +322,6 @@ export default function App() {
   const [round, setRound] = useState({
     answered: 0,
     correct: 0,
-    hearts: HEARTS_PER_ROUND,
   });
   const [stats, setStats] = useState({});
 
@@ -492,6 +493,10 @@ export default function App() {
     () => getRecommendedQuest(stats),
     [stats]
   );
+  const smartCoach = useMemo(
+    () => getSmartCoach(stats, dailyProgress),
+    [dailyProgress, stats]
+  );
 
   const avatar = AVATARS.find((item) => item.id === avatarId) || AVATARS[0];
   const dailyComplete = dailyProgress.completedDate === getTodayKey();
@@ -502,7 +507,7 @@ export default function App() {
     setDifficulty(selectedDifficulty);
     setActiveTopicId(topicId);
     setPlayMode('topic');
-    setRound({ answered: 0, correct: 0, hearts: HEARTS_PER_ROUND });
+    setRound({ answered: 0, correct: 0 });
     setQuestion(generateQuestion(topicId, selectedDifficulty));
     setSelectedChoice(null);
     setSequence([]);
@@ -522,7 +527,7 @@ export default function App() {
     Speech.stop();
     setActiveTopicId(dailyTopic.id);
     setPlayMode('daily');
-    setRound({ answered: 0, correct: 0, hearts: HEARTS_PER_ROUND });
+    setRound({ answered: 0, correct: 0 });
     setQuestion(generateQuestion(dailyTopic.id, difficulty));
     setSelectedChoice(null);
     setSequence([]);
@@ -579,7 +584,7 @@ export default function App() {
     Speech.stop();
     setStats({});
     setMistakes([]);
-    setRound({ answered: 0, correct: 0, hearts: HEARTS_PER_ROUND });
+    setRound({ answered: 0, correct: 0 });
     setFeedback(null);
     setSelectedChoice(null);
     setSequence([]);
@@ -602,7 +607,7 @@ export default function App() {
     Speech.stop();
     setActiveTopicId(mistakes[0].topicId);
     setPlayMode('review');
-    setRound({ answered: 0, correct: 0, hearts: HEARTS_PER_ROUND });
+    setRound({ answered: 0, correct: 0 });
     setQuestion(mistakes[0]);
     setSelectedChoice(null);
     setSequence([]);
@@ -637,7 +642,6 @@ export default function App() {
     const nextRound = {
       answered: round.answered + 1,
       correct: round.correct + (isCorrect ? 1 : 0),
-      hearts: isCorrect ? round.hearts : Math.max(0, round.hearts - 1),
     };
 
     setRound(nextRound);
@@ -908,7 +912,6 @@ export default function App() {
       setRound((current) => ({
         ...current,
         answered: Math.max(0, current.answered - 1),
-        hearts: Math.min(HEARTS_PER_ROUND, current.hearts + 1),
       }));
       setStats((current) => {
         const topicStats = current[activeTopicId];
@@ -1022,44 +1025,73 @@ export default function App() {
           contentContainerStyle={styles.homeContainer}
           style={styles.homeScroll}
         >
-          <Hero
+          <HomePageHeader
+            activeTab={homeTab}
             avatar={avatar}
-            dailyStreak={dailyProgress.streak}
-            mistakesCount={mistakes.length}
-            motionEnabled={motionEnabled}
+            onManual={() => setShowManual(true)}
             onSettings={() => setShowSettings(true)}
-            totals={totals}
           />
-          <NextAdventureCard
-            complete={dailyComplete}
-            onPress={
-              dailyComplete
-                ? () => setSelectedWorldId(recommendedQuest.topic.id)
-                : startDailyAdventure
-            }
-            quest={recommendedQuest}
-            streak={dailyProgress.streak}
-            topic={getDailyTopic()}
-            motionEnabled={motionEnabled}
-          />
-
-          <JourneyActions
-            accuracy={teacherSummary.accuracy}
-            collectedCount={teacherSummary.badgesUnlocked}
-            mistakesCount={mistakes.length}
-            onOpenJourney={() => setShowAdventureBook(true)}
-            onOpenProgress={() => setShowTeacherSummary(true)}
-            onReview={startMistakeReview}
-            stars={totals.correct}
-          />
-
-          <StoryTrail
-            motionEnabled={motionEnabled}
-            onSelectWorld={setSelectedWorldId}
-            recommendedTopicId={recommendedQuest.topic.id}
-            stats={stats}
-          />
+          {homeTab === 'journey' ? (
+            <StoryTrail
+              motionEnabled={motionEnabled}
+              onSelectWorld={setSelectedWorldId}
+              recommendedTopicId={recommendedQuest.topic.id}
+              stats={stats}
+            />
+          ) : homeTab === 'review' ? (
+            <>
+              <HomePageIntro
+                eyebrow="PRACTICE"
+                text="Build a daily habit or revisit questions that need another try."
+                title="Practice & Review"
+              />
+              <NextAdventureCard
+                complete={dailyComplete}
+                onPress={
+                  dailyComplete
+                    ? () => setSelectedWorldId(recommendedQuest.topic.id)
+                    : startDailyAdventure
+                }
+                quest={recommendedQuest}
+                streak={dailyProgress.streak}
+                topic={getDailyTopic()}
+                motionEnabled={motionEnabled}
+              />
+              <MistakeReviewCard
+                mistakesCount={mistakes.length}
+                onPress={startMistakeReview}
+              />
+            </>
+          ) : (
+            <>
+              <HomePageIntro
+                eyebrow="MY LEARNING"
+                text="See earned XP, collected badges and a clear learning report."
+                title="Progress"
+              />
+              <ProgressOverview
+                accuracy={teacherSummary.accuracy}
+                badges={teacherSummary.badgesUnlocked}
+                xp={totals.xp}
+              />
+              <AdventureBookCard
+                avatar={avatar}
+                onPress={() => setShowAdventureBook(true)}
+                stats={stats}
+              />
+              <TeacherSummaryCard
+                onPress={() => setShowTeacherSummary(true)}
+                summary={teacherSummary}
+                totals={totals}
+              />
+            </>
+          )}
         </ScrollView>
+        <HomeTabBar
+          activeTab={homeTab}
+          mistakesCount={mistakes.length}
+          onSelect={setHomeTab}
+        />
         <WorldLaunchModal
           activeDifficulty={difficulty}
           onClose={() => setSelectedWorldId(null)}
@@ -1091,10 +1123,14 @@ export default function App() {
           visible={showAdventureBook}
         />
         <OnboardingModal
+          actionLabel={showManual ? 'Got it' : 'Start My Adventure'}
           avatarId={avatarId}
           onChooseAvatar={setAvatarId}
-          onStart={() => setShowOnboarding(false)}
-          visible={showOnboarding}
+          onStart={() => {
+            setShowManual(false);
+            setShowOnboarding(false);
+          }}
+          visible={showOnboarding || showManual}
         />
         <SettingsModal
           onClose={() => setShowSettings(false)}
@@ -1119,9 +1155,6 @@ export default function App() {
     question?.options?.some((option) => option?.kind === 'objectGroup')
   );
   const hasCompactNumberOptions = question?.display?.kind === 'workshopMissing';
-  const activeDifficultyLevel =
-    DIFFICULTY_LEVELS.find((level) => level.id === difficulty) ||
-    DIFFICULTY_LEVELS[1];
   const activeTopicIndex = TOPICS.findIndex((topic) => topic.id === activeTopicId);
   const nextDifficulty = getNextDifficulty(difficulty);
   const nextTopic =
@@ -1156,18 +1189,12 @@ export default function App() {
           >
             <Text style={styles.practiceSettingsText}>⚙</Text>
           </TouchableOpacity>
-          <View style={styles.heartsRow}>
-            {Array.from({ length: HEARTS_PER_ROUND }).map((_, index) => (
-              <Text
-                key={index}
-                style={[
-                  styles.heart,
-                  index >= round.hearts && styles.heartEmpty,
-                ]}
-              >
-                ♥
-              </Text>
-            ))}
+          <View style={styles.practiceStagePill}>
+            <Text style={styles.practiceStageText}>
+              {playMode === 'review'
+                ? 'REVIEW'
+                : `${Math.min(roundSize, round.answered + 1)} / ${roundSize}`}
+            </Text>
           </View>
         </View>
 
@@ -1181,26 +1208,6 @@ export default function App() {
               },
             ]}
           />
-        </View>
-
-        <View
-          style={[
-            styles.missionCard,
-            { backgroundColor: activeTopic.deepColor },
-          ]}
-        >
-          <View style={styles.missionOrb}>
-            <Text style={styles.missionIcon}>{activeTopic.icon}</Text>
-          </View>
-          <View style={styles.missionCopy}>
-            <Text style={styles.missionEyebrow}>
-              {playMode === 'review'
-                ? 'Mistake review'
-                : `${playMode === 'daily' ? 'Daily Adventure' : activeDifficultyLevel.label} - Stage ${Math.min(roundSize, round.answered + 1)} of ${roundSize}`}
-            </Text>
-            <Text style={styles.missionTitle}>{activeTopic.mapLabel}</Text>
-            <Text style={styles.missionText}>{activeTopic.mission}</Text>
-          </View>
         </View>
 
         {roundComplete ? (
@@ -1219,51 +1226,49 @@ export default function App() {
           />
         ) : (
           <>
-            <QuestionDisplay
-              countedObjects={countedObjects}
-              motionEnabled={motionEnabled}
-              onToggleObject={toggleCountedObject}
-              question={question}
-              topic={activeTopic}
-            />
-
             <View style={styles.challengeCard}>
-              <View style={styles.challengeHeader}>
-                <Text style={styles.challengeLabel}>{question.gameLabel || 'Mini Challenge'}</Text>
-                <View style={styles.challengeTools}>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    onPress={speakQuestion}
-                    style={[
-                      styles.speakButton,
-                      !speechEnabled && styles.disabledToolButton,
-                    ]}
-                  >
-                    <Text style={styles.speakButtonText}>Speak</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    onPress={() => setShowHint(true)}
-                    style={styles.hintButton}
-                  >
-                    <Text style={styles.hintButtonText}>Hint</Text>
-                  </TouchableOpacity>
-                  {earnedBadge && badgePower && (
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      disabled={powerUsed}
-                      onPress={useBadgePower}
-                      style={[styles.powerButton, powerUsed && styles.disabledToolButton]}
-                    >
-                      <Text style={styles.powerButtonText}>
-                        {powerUsed ? 'Tool used' : 'Tool'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
               <Text style={styles.questionPrompt}>{question.prompt}</Text>
               <Text style={styles.questionHelper}>{question.helper}</Text>
+              <View style={styles.challengeTools}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={speakQuestion}
+                  style={[
+                    styles.speakButton,
+                    !speechEnabled && styles.disabledToolButton,
+                  ]}
+                >
+                  <Text style={styles.speakButtonText}>Speak</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={() => setShowHint(true)}
+                  style={styles.hintButton}
+                >
+                  <Text style={styles.hintButtonText}>Hint</Text>
+                </TouchableOpacity>
+                {earnedBadge && badgePower && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    disabled={powerUsed}
+                    onPress={useBadgePower}
+                    style={[styles.powerButton, powerUsed && styles.disabledToolButton]}
+                  >
+                    <Text style={styles.powerButtonText}>
+                      {powerUsed ? 'Tool used' : 'Tool'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <QuestionDisplay
+                countedObjects={countedObjects}
+                embedded
+                motionEnabled={motionEnabled}
+                onToggleObject={toggleCountedObject}
+                question={question}
+                topic={activeTopic}
+              />
 
               {question.interaction === 'tenFrame' ? (
                 <TenFrameBuilder
@@ -1489,6 +1494,117 @@ function NovaCompanion({ compact = false, hero = false, mood, motionEnabled }) {
         ]}
       />
     </Animated.View>
+  );
+}
+
+function HomePageHeader({ activeTab, avatar, onManual, onSettings }) {
+  const pageLabel =
+    activeTab === 'journey'
+      ? 'Journey Map'
+      : activeTab === 'review'
+        ? 'Practice & Review'
+        : 'Progress';
+
+  return (
+    <View style={styles.homePageHeader}>
+      <View style={styles.heroIdentity}>
+        <View style={[styles.avatarMark, { backgroundColor: avatar.color }]}>
+          <Text style={styles.avatarMarkText}>{avatar.mark}</Text>
+        </View>
+        <View>
+          <Text style={styles.homePageBrand}>Nova's Little Worlds</Text>
+          <Text style={styles.homePageLabel}>{pageLabel}</Text>
+        </View>
+      </View>
+      <View style={styles.homeHeaderActions}>
+        <TouchableOpacity
+          accessibilityLabel="Open user manual"
+          accessibilityRole="button"
+          onPress={onManual}
+          style={styles.heroManualButton}
+        >
+          <Text style={styles.heroManualIcon}>?</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityLabel="Open settings"
+          accessibilityRole="button"
+          onPress={onSettings}
+          style={styles.heroSettingsButton}
+        >
+          <Text style={styles.heroSettingsIcon}>⚙</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function HomePageIntro({ eyebrow, text, title }) {
+  return (
+    <View style={styles.homePageIntro}>
+      <Text style={styles.homePageIntroEyebrow}>{eyebrow}</Text>
+      <Text style={styles.homePageIntroTitle}>{title}</Text>
+      <Text style={styles.homePageIntroText}>{text}</Text>
+    </View>
+  );
+}
+
+function ProgressOverview({ accuracy, badges, xp }) {
+  return (
+    <View style={styles.progressOverview}>
+      <ProgressMetric label="XP earned" value={xp} />
+      <ProgressMetric label="Accuracy" value={`${accuracy}%`} />
+      <ProgressMetric label="Badges" value={`${badges}/4`} />
+    </View>
+  );
+}
+
+function ProgressMetric({ label, value }) {
+  return (
+    <View style={styles.progressOverviewMetric}>
+      <Text style={styles.progressOverviewValue}>{value}</Text>
+      <Text style={styles.progressOverviewLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function HomeTabBar({ activeTab, mistakesCount, onSelect }) {
+  const tabs = [
+    { id: 'journey', mark: '\u2302', label: 'Journey' },
+    { id: 'review', mark: '\u21BB', label: 'Review' },
+    { id: 'progress', mark: '\u2605', label: 'Progress' },
+  ];
+
+  return (
+    <View style={styles.homeTabBar}>
+      {tabs.map((tab) => {
+        const active = tab.id === activeTab;
+
+        return (
+          <TouchableOpacity
+            accessibilityRole="tab"
+            accessibilityLabel={tab.label}
+            accessibilityState={{ selected: active }}
+            key={tab.id}
+            onPress={() => onSelect(tab.id)}
+            style={[styles.homeTabButton, active && styles.homeTabButtonActive]}
+          >
+            <View style={[styles.homeTabMark, active && styles.homeTabMarkActive]}>
+              <Text style={[styles.homeTabMarkText, active && styles.homeTabMarkTextActive]}>
+                {tab.mark}
+              </Text>
+              {tab.id === 'review' && mistakesCount > 0 && (
+                <View style={styles.homeTabBadge}>
+                  <Text style={styles.homeTabBadgeText}>{Math.min(9, mistakesCount)}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.homeTabLabel, active && styles.homeTabLabelActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 
@@ -1728,12 +1844,28 @@ function StoryStop({
           {completed ? topic.badgeIcon : unlocked ? topic.icon : 'LOCK'}
         </Text>
       </BouncyTouchable>
-      <View style={styles.storyStopCopy}>
+      <TouchableOpacity
+        accessibilityLabel={`${completed ? 'Play again in' : 'Start'} ${topic.mapLabel}`}
+        accessibilityRole="button"
+        disabled={!unlocked}
+        onPress={onPress}
+        style={styles.storyStopCopy}
+      >
         <Text style={[styles.storyStopStatus, { color: unlocked ? topic.deepColor : '#5A6B7C' }]}>
           {completed ? 'COMPLETE' : isNext ? 'NOVA IS HERE' : unlocked ? 'READY' : 'LOCKED'}
         </Text>
         <Text style={styles.storyStopText}>{visibleStoryText}</Text>
-      </View>
+        <View
+          style={[
+            styles.storyStopAction,
+            { backgroundColor: unlocked ? topic.deepColor : '#A9B8C8' },
+          ]}
+        >
+          <Text style={styles.storyStopActionText}>
+            {completed ? 'PLAY AGAIN' : unlocked ? 'START' : 'LOCKED'}
+          </Text>
+        </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -2114,29 +2246,74 @@ function AdventureBookModal({ avatar, dailyProgress, onClose, stats, totals, vis
             })}
           </View>
 
-          <ScrollView style={styles.summaryTopicList}>
-            {TOPICS.map((topic) => {
-              const topicStats = getTopicStats(stats, topic.id);
-              const mastery = getMastery(topicStats);
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
-              return (
-                <View key={topic.id} style={styles.masteryRow}>
-                  <View style={[styles.masteryIcon, { backgroundColor: topic.softColor }]}>
-                    <Text style={styles.masteryIconText}>{topic.icon}</Text>
-                  </View>
-                  <View style={styles.masteryCopy}>
-                    <View style={styles.masteryTitleRow}>
-                      <Text style={styles.masteryTitle}>{topic.mapLabel}</Text>
-                      <Text style={[styles.masteryLabel, { color: topic.deepColor }]}>{mastery.label}</Text>
+function OnboardingModal({ actionLabel, avatarId, onChooseAvatar, onStart, visible }) {
+  return (
+    <Modal animationType="fade" transparent visible={visible}>
+      <View style={styles.popupOverlay}>
+        <View style={styles.onboardingCard}>
+          <ScrollView
+            contentContainerStyle={styles.onboardingContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Image
+              resizeMode="contain"
+              source={require('./assets/nova-mascot-clean.png')}
+              style={styles.onboardingNova}
+            />
+            <Text style={styles.onboardingTitle}>How to Explore</Text>
+            <Text style={styles.onboardingText}>
+              Nova will guide you. Here is everything you need to begin.
+            </Text>
+
+            <View style={styles.onboardingSteps}>
+              <OnboardingStep
+                number="1"
+                text="Open Journey and tap START beside any unlocked world."
+                title="Choose a world"
+              />
+              <OnboardingStep
+                number="2"
+                text="Choose a challenge, read the question and tap or build your answer. Speak and Hint can help."
+                title="Solve the question"
+              />
+              <OnboardingStep
+                number="3"
+                text="Use Review for daily practice and mistakes. Use Progress for XP, badges and reports."
+                title="Follow your learning"
+              />
+            </View>
+
+            <Text style={styles.onboardingChoiceLabel}>CHOOSE YOUR EXPLORER MARK</Text>
+            <View style={styles.avatarChoices}>
+              {AVATARS.map((avatar) => {
+                const selected = avatar.id === avatarId;
+                return (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    key={avatar.id}
+                    onPress={() => onChooseAvatar(avatar.id)}
+                    style={[
+                      styles.avatarChoice,
+                      selected && { backgroundColor: avatar.color, borderColor: avatar.color },
+                    ]}
+                  >
+                    <View style={[styles.avatarChoiceMark, { backgroundColor: selected ? '#FFFFFF' : avatar.color }]}>
+                      <Text style={[styles.avatarChoiceMarkText, selected && { color: avatar.color }]}>{avatar.mark}</Text>
                     </View>
-                    <View style={styles.masteryTrack}>
-                      <View style={[styles.masteryFill, { backgroundColor: topic.color, width: `${mastery.progress}%` }]} />
-                    </View>
-                    <Text style={styles.masteryText}>{topicStats.correct}/{topicStats.answered || 0} correct - {getTopicAccuracy(topicStats)}% accuracy</Text>
-                  </View>
-                </View>
-              );
-            })}
+                    <Text style={[styles.avatarChoiceText, selected && styles.avatarChoiceTextSelected]}>{avatar.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity accessibilityRole="button" onPress={onStart} style={styles.onboardingButton}>
+              <Text style={styles.primaryButtonText}>{actionLabel}</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       </View>
@@ -2144,45 +2321,17 @@ function AdventureBookModal({ avatar, dailyProgress, onClose, stats, totals, vis
   );
 }
 
-function OnboardingModal({ avatarId, onChooseAvatar, onStart, visible }) {
+function OnboardingStep({ number, text, title }) {
   return (
-    <Modal animationType="fade" transparent visible={visible}>
-      <View style={styles.popupOverlay}>
-        <View style={styles.onboardingCard}>
-          <View style={styles.novaBubble}>
-            <Text style={styles.novaBubbleText}>N</Text>
-          </View>
-          <Text style={styles.onboardingTitle}>Welcome, Star Explorer!</Text>
-          <Text style={styles.onboardingText}>
-            I am Nova. Choose your explorer mark, then we will discover Little Worlds together.
-          </Text>
-          <View style={styles.avatarChoices}>
-            {AVATARS.map((avatar) => {
-              const selected = avatar.id === avatarId;
-              return (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  key={avatar.id}
-                  onPress={() => onChooseAvatar(avatar.id)}
-                  style={[
-                    styles.avatarChoice,
-                    selected && { backgroundColor: avatar.color, borderColor: avatar.color },
-                  ]}
-                >
-                  <View style={[styles.avatarChoiceMark, { backgroundColor: selected ? '#FFFFFF' : avatar.color }]}>
-                    <Text style={[styles.avatarChoiceMarkText, selected && { color: avatar.color }]}>{avatar.mark}</Text>
-                  </View>
-                  <Text style={[styles.avatarChoiceText, selected && styles.avatarChoiceTextSelected]}>{avatar.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <TouchableOpacity accessibilityRole="button" onPress={onStart} style={styles.onboardingButton}>
-            <Text style={styles.primaryButtonText}>Start My Adventure</Text>
-          </TouchableOpacity>
-        </View>
+    <View style={styles.onboardingStep}>
+      <View style={styles.onboardingStepNumber}>
+        <Text style={styles.onboardingStepNumberText}>{number}</Text>
       </View>
-    </Modal>
+      <View style={styles.onboardingStepCopy}>
+        <Text style={styles.onboardingStepTitle}>{title}</Text>
+        <Text style={styles.onboardingStepText}>{text}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -2559,7 +2708,6 @@ function RoundComplete({
       </View>
       <View style={styles.rewardRow}>
         <RewardBox label="Accuracy" value={`${round.correct}/${roundSize}`} />
-        <RewardBox label="Hearts" value={round.hearts} />
         <RewardBox label="XP" value={round.correct * XP_PER_CORRECT} />
       </View>
       <View
@@ -2694,6 +2842,17 @@ function SettingsModal({
   speechEnabled,
   visible,
 }) {
+  const confirmResetProgress = () => {
+    Alert.alert(
+      'Reset all progress?',
+      'This will remove saved XP, badges, streaks and mistakes. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: onResetProgress },
+      ]
+    );
+  };
+
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.popupOverlay}>
@@ -2742,7 +2901,7 @@ function SettingsModal({
 
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={onResetProgress}
+            onPress={confirmResetProgress}
             style={styles.resetProgressButton}
           >
             <Text style={styles.resetProgressText}>Reset Progress</Text>
@@ -2780,10 +2939,12 @@ function FloatingTreasure({ children, index, motionEnabled }) {
   return <Animated.View style={{ transform: [{ translateY: drift }] }}>{children}</Animated.View>;
 }
 
-function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, question, topic }) {
+function QuestionDisplay({ countedObjects, embedded = false, motionEnabled, onToggleObject, question, topic }) {
+  const embeddedStyle = embedded ? styles.embeddedVisualCard : null;
+
   if (question.display.kind === 'objects') {
     return (
-      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
+      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }, embeddedStyle]}>
           <Text style={styles.visualTitle}>{question.gameLabel || 'Pack the orchard basket'}</Text>
           <View style={styles.objectWrap}>
             {Array.from({ length: question.display.count }).map((_, index) => (
@@ -2814,7 +2975,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
     const { goal, leftCount, object, rightCount } = question.display;
 
     return (
-      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
+      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Compare the baskets'}</Text>
         <Text style={[styles.compareGoal, { color: topic.deepColor }]}>Find the {goal} group</Text>
         <View style={styles.compareGroups}>
@@ -2843,6 +3004,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
           styles.visualCard,
           styles.compactVisualCard,
           { backgroundColor: topic.glowColor },
+          embeddedStyle,
         ]}
       >
         <Text style={styles.visualTitle}>{question.gameLabel}</Text>
@@ -2863,7 +3025,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'workshopTarget') {
     return (
-      <View style={[styles.visualCard, styles.workshopVisualCard]}>
+      <View style={[styles.visualCard, styles.workshopVisualCard, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Power the number machine'}</Text>
         <View style={[styles.workshopTargetScreen, { borderColor: topic.color }]}>
           <Text style={styles.workshopTargetLabel}>TARGET POWER</Text>
@@ -2890,7 +3052,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
     const onesValue = question.display.missingPart === 'ones' ? '?' : question.display.ones;
 
     return (
-      <View style={[styles.visualCard, styles.workshopVisualCard]}>
+      <View style={[styles.visualCard, styles.workshopVisualCard, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Find the missing part'}</Text>
         <View style={styles.workshopEquationVisual}>
           <View style={[styles.workshopEquationPart, styles.workshopEquationTens]}>
@@ -2915,7 +3077,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'placeValue') {
     return (
-      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
+      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }, embeddedStyle]}>
         {question.display.showNumber !== false && (
           <Text style={[styles.bigNumber, { color: topic.deepColor }]}>
             {question.display.number}
@@ -2943,7 +3105,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'wordPairs') {
     return (
-      <View style={[styles.visualCard, styles.compactVisualCard, styles.gardenVisualCard]}>
+      <View style={[styles.visualCard, styles.compactVisualCard, styles.gardenVisualCard, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel}</Text>
         <View style={styles.matchMissionRow}>
           {question.display.pairs.map((pair) => (
@@ -2967,7 +3129,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'bigNumber') {
     return (
-      <View style={[styles.visualCard, styles.gardenVisualCard]}>
+      <View style={[styles.visualCard, styles.gardenVisualCard, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Grow a word flower'}</Text>
         <GardenFlower color={topic.color}>
           <Text style={[styles.gardenNumber, { color: topic.deepColor }]}>
@@ -2980,7 +3142,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'targetNumber') {
     return (
-      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
+      <View style={[styles.visualCard, { backgroundColor: topic.glowColor }, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Pack the right basket'}</Text>
         <View style={[styles.numberPortal, { borderColor: topic.color }]}>
           <Text style={[styles.bigNumber, { color: topic.deepColor }]}>
@@ -2993,7 +3155,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
 
   if (question.display.kind === 'word') {
     return (
-      <View style={[styles.visualCard, styles.gardenVisualCard]}>
+      <View style={[styles.visualCard, styles.gardenVisualCard, embeddedStyle]}>
         <Text style={styles.visualTitle}>{question.gameLabel || 'Read the garden label'}</Text>
         <GardenFlower color={topic.color}>
           <Text style={[styles.gardenWord, { color: topic.deepColor }]}>
@@ -3005,7 +3167,7 @@ function QuestionDisplay({ countedObjects, motionEnabled, onToggleObject, questi
   }
 
   return (
-    <View style={[styles.visualCard, { backgroundColor: topic.glowColor }]}>
+    <View style={[styles.visualCard, { backgroundColor: topic.glowColor }, embeddedStyle]}>
       <Text style={styles.visualTitle}>{question.gameLabel || 'Set the comet route'}</Text>
       <View style={styles.trailPreview}>
         {question.answer.map((_, index) => (
@@ -3829,11 +3991,149 @@ const styles = StyleSheet.create({
   },
   homeScroll: {
     backgroundColor: '#DDF3FF',
+    flex: 1,
   },
   homeContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingBottom: 28,
     paddingTop: 12,
+  },
+  homePageHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  homePageBrand: {
+    color: '#13293D',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  homePageLabel: {
+    color: '#60758A',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  homePageIntro: {
+    marginBottom: 16,
+    paddingHorizontal: 2,
+  },
+  homePageIntroEyebrow: {
+    color: '#0B6FA4',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  homePageIntroTitle: {
+    color: '#13293D',
+    fontSize: 27,
+    fontWeight: '900',
+    marginTop: 3,
+  },
+  homePageIntroText: {
+    color: '#52677D',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  progressOverview: {
+    ...shadow,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D9E5EF',
+    borderRadius: 8,
+    borderWidth: 2,
+    flexDirection: 'row',
+    marginBottom: 14,
+    paddingVertical: 15,
+  },
+  progressOverviewMetric: {
+    alignItems: 'center',
+    borderRightColor: '#D9E5EF',
+    borderRightWidth: 1,
+    flex: 1,
+    paddingHorizontal: 4,
+  },
+  progressOverviewValue: {
+    color: '#13293D',
+    fontSize: 21,
+    fontWeight: '900',
+  },
+  progressOverviewLabel: {
+    color: '#60758A',
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  homeTabBar: {
+    backgroundColor: '#FFFFFF',
+    borderTopColor: '#D7E5EE',
+    borderTopWidth: 2,
+    flexDirection: 'row',
+    minHeight: 78,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  homeTabButton: {
+    alignItems: 'center',
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 60,
+  },
+  homeTabButtonActive: {
+    backgroundColor: '#F4FBFF',
+  },
+  homeTabMark: {
+    alignItems: 'center',
+    borderRadius: 8,
+    height: 35,
+    justifyContent: 'center',
+    minWidth: 46,
+    paddingHorizontal: 8,
+  },
+  homeTabMarkActive: {
+    backgroundColor: '#DDF4FF',
+    borderBottomColor: '#1CB0F6',
+    borderBottomWidth: 4,
+  },
+  homeTabMarkText: {
+    color: '#7B8C9B',
+    fontSize: 23,
+    fontWeight: '900',
+    lineHeight: 25,
+  },
+  homeTabMarkTextActive: {
+    color: '#0B8FD3',
+  },
+  homeTabLabel: {
+    color: '#60758A',
+    fontSize: 10,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  homeTabLabelActive: {
+    color: '#0B6FA4',
+  },
+  homeTabBadge: {
+    alignItems: 'center',
+    backgroundColor: '#FF6B6B',
+    borderColor: '#FFFFFF',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 18,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: -8,
+    top: -7,
+    width: 18,
+  },
+  homeTabBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
   },
   hero: {
     marginBottom: 14,
@@ -3926,6 +4226,26 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: 'center',
     width: 44,
+  },
+  homeHeaderActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  heroManualButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFF4C7',
+    borderColor: '#FFC800',
+    borderRadius: 22,
+    borderWidth: 2,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  heroManualIcon: {
+    color: '#9B6200',
+    fontSize: 22,
+    fontWeight: '900',
   },
   heroSettingsIcon: {
     color: '#0B6FA4',
@@ -4820,7 +5140,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.93)',
     borderRadius: 8,
     marginTop: 6,
-    minHeight: 42,
+    minHeight: 58,
     paddingHorizontal: 6,
     paddingVertical: 5,
     width: 116,
@@ -4838,6 +5158,19 @@ const styles = StyleSheet.create({
     lineHeight: 11,
     marginTop: 2,
     textAlign: 'center',
+  },
+  storyStopAction: {
+    alignItems: 'center',
+    borderRadius: 6,
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: 22,
+    paddingHorizontal: 6,
+  },
+  storyStopActionText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '900',
   },
   storyStopPulse: {
     backgroundColor: 'rgba(255, 248, 199, 0.62)',
@@ -5058,21 +5391,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '900',
   },
-  heartsRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+  practiceStagePill: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    justifyContent: 'center',
+    minHeight: 42,
+    minWidth: 64,
+    paddingHorizontal: 13,
   },
-  heart: {
-    color: '#FF6B6B',
-    fontSize: 18,
+  practiceStageText: {
+    color: '#13293D',
+    fontSize: 12,
     fontWeight: '900',
-  },
-  heartEmpty: {
-    color: 'rgba(255, 255, 255, 0.35)',
   },
   progressShell: {
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
@@ -5135,6 +5466,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     padding: 18,
     justifyContent: 'center',
+  },
+  embeddedVisualCard: {
+    borderRadius: 20,
+    elevation: 0,
+    marginBottom: 14,
+    marginTop: 12,
+    padding: 14,
+    shadowOpacity: 0,
   },
   compactVisualCard: {
     minHeight: 132,
@@ -5579,8 +5918,8 @@ const styles = StyleSheet.create({
   challengeCard: {
     ...shadow,
     backgroundColor: '#FFFFFF',
-    borderRadius: 30,
-    padding: 18,
+    borderRadius: 22,
+    padding: 16,
   },
   challengeHeader: {
     alignItems: 'stretch',
@@ -5588,9 +5927,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   challengeTools: {
-    alignSelf: 'flex-end',
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     gap: 8,
+    marginTop: 1,
   },
   challengeLabel: {
     color: '#7A8CA0',
@@ -5651,11 +5991,11 @@ const styles = StyleSheet.create({
   },
   questionHelper: {
     color: '#5A6B7C',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    lineHeight: 23,
-    marginBottom: 16,
-    marginTop: 8,
+    lineHeight: 20,
+    marginBottom: 10,
+    marginTop: 6,
   },
   optionsGrid: {
     gap: 12,
@@ -7368,14 +7708,23 @@ const styles = StyleSheet.create({
   },
   onboardingCard: {
     ...shadow,
-    alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderColor: '#F7C948',
-    borderRadius: 34,
+    borderRadius: 26,
     borderWidth: 4,
+    maxHeight: '92%',
     maxWidth: 440,
-    padding: 24,
+    overflow: 'hidden',
     width: '100%',
+  },
+  onboardingContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  onboardingNova: {
+    height: 76,
+    marginBottom: 2,
+    width: 72,
   },
   novaBubble: {
     alignItems: 'center',
@@ -7395,23 +7744,72 @@ const styles = StyleSheet.create({
   },
   onboardingTitle: {
     color: '#13293D',
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '900',
     textAlign: 'center',
   },
   onboardingText: {
     color: '#42576C',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
-    lineHeight: 23,
-    marginBottom: 20,
-    marginTop: 8,
+    lineHeight: 20,
+    marginBottom: 14,
+    marginTop: 5,
     textAlign: 'center',
+  },
+  onboardingSteps: {
+    gap: 8,
+    marginBottom: 15,
+    width: '100%',
+  },
+  onboardingStep: {
+    alignItems: 'center',
+    backgroundColor: '#F6F9FC',
+    borderColor: '#D9E5EF',
+    borderRadius: 8,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 10,
+  },
+  onboardingStepNumber: {
+    alignItems: 'center',
+    backgroundColor: '#1CB0F6',
+    borderRadius: 8,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  onboardingStepNumberText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  onboardingStepCopy: {
+    flex: 1,
+  },
+  onboardingStepTitle: {
+    color: '#13293D',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  onboardingStepText: {
+    color: '#52677D',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  onboardingChoiceLabel: {
+    color: '#60758A',
+    fontSize: 10,
+    fontWeight: '900',
+    marginBottom: 8,
   },
   avatarChoices: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 20,
+    marginBottom: 14,
     width: '100%',
   },
   avatarChoice: {
@@ -7421,8 +7819,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 2,
     flex: 1,
-    minHeight: 102,
-    padding: 10,
+    minHeight: 82,
+    padding: 8,
   },
   avatarChoiceMark: {
     alignItems: 'center',

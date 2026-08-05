@@ -62,7 +62,6 @@ export const TOPICS = [
 ];
 
 export const ROUND_SIZE = 5;
-export const HEARTS_PER_ROUND = 3;
 export const XP_PER_CORRECT = 10;
 
 export const DIFFICULTY_LEVELS = [
